@@ -2,7 +2,7 @@ const stripTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || "https://api.salesvince.app";
 
-export const APP_NAME = "Salevince";
+export const APP_NAME = "Salevince ERP";
 export const API_URL = stripTrailingSlash(apiBaseUrl);
 export const APP_URL = stripTrailingSlash(
   import.meta.env.VITE_APP_URL?.trim() ||

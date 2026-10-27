@@ -16,7 +16,9 @@ import {
   Flag,
   UserCircle,
   Shield,
-  LogOut
+  LogOut,
+  MessageSquare,
+  FileText,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import logo from "figma:asset/c9eb705c262b44e040c81098d26d37c195fe9678.png";
@@ -36,6 +38,8 @@ const navigation = [
   { name: "Customers", href: "/master/customers", icon: UserCircle },
   { name: "Billing", href: "/master/billing", icon: CreditCard },
   { name: "Modules", href: "/master/modules", icon: Package },
+  { name: "WhatsApp Templates", href: "/master/whatsapp-templates", icon: MessageSquare },
+  { name: "Document Templates", href: "/master/document-templates", icon: FileText },
   { name: "Announcements", href: "/master/announcements", icon: Megaphone },
   { name: "Platform Users", href: "/master/users", icon: Users },
   { name: "Roles", href: "/master/roles", icon: Shield },
@@ -253,7 +257,7 @@ export default function Layout() {
             <img src={logo} alt="Salevince" className="size-8" />
             <div>
               <div className="text-sm font-semibold text-white">{APP_NAME}</div>
-              <div className="text-xs" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Control Panle</div>
+              <div className="text-xs" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Control Panel</div>
             </div>
           </div>
         </div>

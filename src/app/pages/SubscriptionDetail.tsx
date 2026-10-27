@@ -528,8 +528,8 @@ export default function SubscriptionDetail() {
                   <div><p className="text-xs font-medium mb-1" style={{ color: "#6B6C7E" }}>Company Code</p><p className="font-mono" style={{ color: "#21222D" }}>{subscription.tenant.code}</p></div>
                   <div>
                     <p className="text-xs font-medium mb-1" style={{ color: "#6B6C7E" }}>Subdomain</p>
-                    <a href={`https://${(subscription.tenant.profile?.displayName || subscription.tenant.name).toLowerCase().replace(/\s+/g, "")}.snd.com`} className="hover:underline" style={{ color: "#958CE8" }}>
-                      {(subscription.tenant.profile?.displayName || subscription.tenant.name).toLowerCase().replace(/\s+/g, "")}.snd.com
+                    <a href={`https://${(subscription.tenant.profile?.displayName || subscription.tenant.name).toLowerCase().replace(/\s+/g, "")}.erp.com`} className="hover:underline" style={{ color: "#958CE8" }}>
+                      {(subscription.tenant.profile?.displayName || subscription.tenant.name).toLowerCase().replace(/\s+/g, "")}.erp.com
                     </a>
                   </div>
                   <div><p className="text-xs font-medium mb-1" style={{ color: "#6B6C7E" }}>Email</p><p style={{ color: "#21222D" }}>{subscription.tenant.email || subscription.tenant.profile?.supportEmail || "N/A"}</p></div>

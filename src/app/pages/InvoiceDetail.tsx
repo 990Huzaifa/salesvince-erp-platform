@@ -194,8 +194,8 @@ export default function InvoiceDetail() {
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900 mb-3">From</h3>
                     <div className="text-sm text-gray-600 space-y-1">
-                      <p className="font-medium text-gray-900">SND Platform</p>
-                      <p>platform@snd.com</p>
+                      <p className="font-medium text-gray-900">ERP Platform</p>
+                      <p>platform@erp.com</p>
                       <p>456 Platform Ave</p>
                       <p>San Francisco, CA 94102</p>
                     </div>

@@ -46,6 +46,9 @@ type TenantFormState = {
   emailAddress: string;
   phoneNumber: string;
   address: string;
+  displayPhoneNumber: string;
+  phoneCountryCode: string;
+  phoneNationalNumber: string;
 };
 
 const initialTenantFormState: TenantFormState = {
@@ -56,6 +59,14 @@ const initialTenantFormState: TenantFormState = {
   emailAddress: "",
   phoneNumber: "",
   address: "",
+  displayPhoneNumber: "",
+  phoneCountryCode: "",
+  phoneNationalNumber: "",
+};
+
+const getWhatsappLimitValue = (plan?: ApiPlan) => {
+  const limit = plan?.plan_limits?.find((item) => item.limitKey === "WHATSAPP");
+  return limit?.limitValue ?? 0;
 };
 
 const formatPlanPrice = (value: number, currency: string) =>
@@ -99,6 +110,26 @@ export default function TenantList() {
     () => plans.filter((plan) => plan.is_active && plan.is_display),
     [plans]
   );
+
+  const selectedPlan = useMemo(
+    () => visiblePlans.find((plan) => plan.id === tenantForm.planId),
+    [visiblePlans, tenantForm.planId]
+  );
+
+  const showWhatsappFields = getWhatsappLimitValue(selectedPlan) >= 1;
+
+  useEffect(() => {
+    if (showWhatsappFields) {
+      return;
+    }
+
+    setTenantForm((current) => ({
+      ...current,
+      displayPhoneNumber: "",
+      phoneCountryCode: "",
+      phoneNationalNumber: "",
+    }));
+  }, [showWhatsappFields]);
 
   const loadTenants = async () => {
     setLoading(true);
@@ -196,21 +227,39 @@ export default function TenantList() {
       return;
     }
 
+    if (
+      showWhatsappFields &&
+      (!tenantForm.displayPhoneNumber.trim() ||
+        !tenantForm.phoneCountryCode.trim() ||
+        !tenantForm.phoneNationalNumber.trim())
+    ) {
+      setCreateError("Please fill in all WhatsApp phone fields.");
+      return;
+    }
+
     setCreateError("");
     setCreatingTenant(true);
 
     try {
+      const payload: Record<string, string> = {
+        name: tenantForm.name,
+        email: tenantForm.emailAddress,
+        industryType: tenantForm.industryType,
+        planId: tenantForm.planId.toString(),
+        displayName: tenantForm.displayName,
+        phone: tenantForm.phoneNumber,
+        address: tenantForm.address,
+      };
+
+      if (showWhatsappFields) {
+        payload.displayPhoneNumber = tenantForm.displayPhoneNumber.trim();
+        payload.phoneCountryCode = tenantForm.phoneCountryCode.trim();
+        payload.phoneNationalNumber = tenantForm.phoneNationalNumber.trim();
+      }
+
       await apiJson("platform/tenant", {
         method: "POST",
-        body: JSON.stringify({
-          name: tenantForm.name,
-          email: tenantForm.emailAddress,
-          industryType: tenantForm.industryType,
-          planId: tenantForm.planId.toString(),
-          displayName: tenantForm.displayName,
-          phone: tenantForm.phoneNumber,
-          address: tenantForm.address,
-        }),
+        body: JSON.stringify(payload),
       });
 
       closeCreateModal();
@@ -633,6 +682,62 @@ export default function TenantList() {
                   </div>
                 </div>
               </div>
+
+              {showWhatsappFields ? (
+                <div>
+                  <h3 className="text-base font-semibold mb-5" style={{ color: "#21222D" }}>WhatsApp Account</h3>
+                  <p className="text-sm mb-5" style={{ color: "#6B6C7E" }}>
+                    This plan includes WhatsApp. Add the business phone number for the tenant.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium mb-2" style={{ color: "#21222D" }}>Display Phone Number *</label>
+                      <input
+                        type="text"
+                        value={tenantForm.displayPhoneNumber}
+                        onChange={(e) => updateTenantForm("displayPhoneNumber", e.target.value)}
+                        placeholder="+923001234567"
+                        className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                        style={{
+                          borderColor: "rgba(219, 219, 229, 0.6)",
+                          backgroundColor: "#FAFBFC",
+                          "--tw-ring-color": "#958CE8",
+                        } as React.CSSProperties}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: "#21222D" }}>Phone Country Code *</label>
+                      <input
+                        type="text"
+                        value={tenantForm.phoneCountryCode}
+                        onChange={(e) => updateTenantForm("phoneCountryCode", e.target.value)}
+                        placeholder="+92"
+                        className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                        style={{
+                          borderColor: "rgba(219, 219, 229, 0.6)",
+                          backgroundColor: "#FAFBFC",
+                          "--tw-ring-color": "#958CE8",
+                        } as React.CSSProperties}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: "#21222D" }}>Phone National Number *</label>
+                      <input
+                        type="text"
+                        value={tenantForm.phoneNationalNumber}
+                        onChange={(e) => updateTenantForm("phoneNationalNumber", e.target.value)}
+                        placeholder="3001234567"
+                        className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                        style={{
+                          borderColor: "rgba(219, 219, 229, 0.6)",
+                          backgroundColor: "#FAFBFC",
+                          "--tw-ring-color": "#958CE8",
+                        } as React.CSSProperties}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="sticky bottom-0 px-8 py-6 border-t rounded-b-3xl flex items-center justify-between" style={{ backgroundColor: "#FAFBFC", borderColor: "rgba(219, 219, 229, 0.3)" }}>

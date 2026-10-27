@@ -21,7 +21,7 @@ type LoginFormState = {
 };
 
 const demoCredentials: LoginFormState = {
-  email: "admin@snd.com",
+  email: "admin@erp.com",
   password: "demo9090",
 };
 
@@ -285,7 +285,7 @@ export default function MasterLogin() {
                 Demo credentials
               </p>
               <p className="mt-2 text-sm" style={{ color: "#21222D" }}>
-                <span className="font-medium">Email:</span> admin@snd.com
+                <span className="font-medium">Email:</span> admin@erp.com
               </p>
               <p className="text-sm" style={{ color: "#21222D" }}>
                 <span className="font-medium">Password:</span> demo9090

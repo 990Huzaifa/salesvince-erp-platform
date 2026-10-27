@@ -5,6 +5,8 @@ import Dashboard from "./pages/Dashboard";
 import TenantList from "./pages/TenantList";
 import TenantDetail from "./pages/TenantDetail";
 import ModuleManagement from "./pages/ModuleManagement";
+import WhatsappTemplates from "./pages/WhatsappTemplates";
+import DocumentTemplates from "./pages/DocumentTemplates";
 import PlatformUsers from "./pages/PlatformUsers";
 import ActivityLogs from "./pages/ActivityLogs";
 import Billing from "./pages/Billing";
@@ -29,6 +31,8 @@ export const router = createBrowserRouter([
           { path: "tenants", Component: TenantList },
           { path: "tenants/:tenantId", Component: TenantDetail },
           { path: "modules", Component: ModuleManagement },
+          { path: "whatsapp-templates", Component: WhatsappTemplates },
+          { path: "document-templates", Component: DocumentTemplates },
           { path: "users", Component: PlatformUsers },
           { path: "activity", Component: ActivityLogs },
           { path: "billing", Component: Billing },

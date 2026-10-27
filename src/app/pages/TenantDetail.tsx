@@ -17,6 +17,12 @@ import {
   Trash2,
   Power,
   PlayCircle,
+  MessageSquare,
+  Plus,
+  X,
+  Eye,
+  Edit2,
+  ArrowUpCircle,
 } from "lucide-react";
 
 type ProvisioningLog = {
@@ -142,7 +148,101 @@ type StateOption = {
   updated_at: string;
 };
 
-type Tab = "overview" | "modules" | "database" | "provisioning" | "settings" | "activity";
+type DocumentTemplatePackOption = {
+  id: string;
+  code: string;
+  name: string;
+  status: "ACTIVE" | "INACTIVE";
+  isDefault: boolean;
+};
+
+type DocumentTemplatePackListResponse = {
+  data: DocumentTemplatePackOption[];
+  meta?: {
+    total: number;
+    page: number;
+    limit: number;
+  };
+};
+
+type TenantDocumentTemplateAssignment = {
+  id?: string;
+  tenantId: string;
+  templateId: string;
+  template?: DocumentTemplatePackOption | null;
+};
+
+type ResolvedDocumentTemplate = {
+  template: DocumentTemplatePackOption | null;
+  item?: unknown;
+};
+
+type Tab = "overview" | "modules" | "database" | "migrations" | "provisioning" | "settings" | "activity" | "whatsapp-account";
+
+type ApiPlanLimit = {
+  id?: number;
+  limitKey: string;
+  limitValue: number;
+};
+
+type ApiPlan = {
+  id: number;
+  plan_limits: ApiPlanLimit[];
+};
+
+type SubscriptionListItem = {
+  tenant: {
+    id: string;
+  };
+  plan: {
+    id: number;
+  };
+};
+
+type SubscriptionListResponse = {
+  data: SubscriptionListItem[];
+};
+
+type WhatsappAccount = {
+  id: string;
+  tenantId: string;
+  provider: string;
+  displayPhoneNumber: string;
+  phoneCountryCode: string;
+  phoneNationalNumber: string;
+  status: string;
+  isDefault: boolean;
+  hasToken: boolean;
+  connectedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type WhatsappAccountDetail = WhatsappAccount & {
+  wabaId: string | null;
+  phoneNumberId: string | null;
+  businessAccountId: string | null;
+  tokenExpiresAt: string | null;
+  setupStartedAt: string | null;
+  failedAt: string | null;
+  disabledAt: string | null;
+  failureReason: string | null;
+};
+
+type WhatsappAccountListResponse = {
+  data: WhatsappAccount[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+  };
+};
+
+type WhatsappAccountFormPayload = {
+  displayPhoneNumber: string;
+  phoneCountryCode: string;
+  phoneNationalNumber: string;
+};
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "N/A";
@@ -151,11 +251,54 @@ const formatDateTime = (value?: string | null) => {
   return date.toLocaleString();
 };
 
+const unwrapWhatsappAccounts = (response: WhatsappAccountListResponse): WhatsappAccount[] =>
+  response.data ?? [];
+
+const unwrapWhatsappAccountDetail = (
+  response: WhatsappAccountDetail | { data: WhatsappAccountDetail },
+): WhatsappAccountDetail => {
+  if (response && typeof response === "object" && "data" in response && response.data) {
+    return response.data;
+  }
+
+  return response as WhatsappAccountDetail;
+};
+
+const canStartWhatsappConnect = (status: string) =>
+  status === "NUMBER_SAVED" || status === "FAILED";
+
+const formatWhatsappStatus = (status: string) =>
+  status
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getWhatsappStatusStyle = (status: string) => {
+  if (status === "CONNECTED") {
+    return { color: "#10B981", backgroundColor: "rgba(16, 185, 129, 0.1)" };
+  }
+
+  if (status === "NUMBER_SAVED") {
+    return { color: "#F59E0B", backgroundColor: "rgba(245, 158, 11, 0.1)" };
+  }
+
+  if (status === "FAILED" || status === "DISABLED") {
+    return { color: "#EF4444", backgroundColor: "rgba(239, 68, 68, 0.1)" };
+  }
+
+  return { color: "#6B6C7E", backgroundColor: "rgba(107, 108, 126, 0.1)" };
+};
+
+const getWhatsappLimitValue = (limits: ApiPlanLimit[]) => {
+  const limit = limits.find((item) => item.limitKey === "WHATSAPP");
+  return limit?.limitValue ?? 0;
+};
+
 const mockTenant = {
   id: "1",
   name: "Acme Corporation",
   code: "ACME",
-  subdomain: "acme.snd.com",
+  subdomain: "acme.erp.com",
   status: "PROVISIONED" as const,
   dbStatus: "CONNECTED" as const,
   createdAt: "2026-01-15 10:30:00",
@@ -172,9 +315,9 @@ const mockTenant = {
   ],
   database: {
     host: "tenant-db-cluster.aws.com",
-    name: "snd_acme",
+    name: "erp_acme",
     user: "acme_user",
-    pool: { active: 8, idle: 12, max: 20 },
+    pool: { active: 8, idle: 12, max: 20 },   
     lastHealthCheck: "2 mins ago",
     status: "HEALTHY",
   },
@@ -238,6 +381,41 @@ export default function TenantDetail() {
   const [tenantModulesError, setTenantModulesError] = useState("");
   const [tenantModuleUpdating, setTenantModuleUpdating] = useState<string | null>(null);
   const [tenantModuleActionError, setTenantModuleActionError] = useState("");
+  const [whatsappLimitValue, setWhatsappLimitValue] = useState(0);
+  const [whatsappAccessLoading, setWhatsappAccessLoading] = useState(false);
+  const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsappAccount[]>([]);
+  const [whatsappAccountsLoading, setWhatsappAccountsLoading] = useState(false);
+  const [whatsappAccountsError, setWhatsappAccountsError] = useState("");
+  const [showWhatsappFormModal, setShowWhatsappFormModal] = useState(false);
+  const [whatsappFormMode, setWhatsappFormMode] = useState<"create" | "edit">("create");
+  const [editingWhatsappAccountId, setEditingWhatsappAccountId] = useState<string | null>(null);
+  const [whatsappForm, setWhatsappForm] = useState<WhatsappAccountFormPayload>({
+    displayPhoneNumber: "",
+    phoneCountryCode: "",
+    phoneNationalNumber: "",
+  });
+  const [whatsappFormError, setWhatsappFormError] = useState("");
+  const [whatsappSubmitting, setWhatsappSubmitting] = useState(false);
+  const [showWhatsappViewModal, setShowWhatsappViewModal] = useState(false);
+  const [selectedWhatsappAccount, setSelectedWhatsappAccount] = useState<WhatsappAccountDetail | null>(null);
+  const [whatsappViewLoading, setWhatsappViewLoading] = useState(false);
+  const [whatsappViewError, setWhatsappViewError] = useState("");
+  const [whatsappConnectingId, setWhatsappConnectingId] = useState<string | null>(null);
+  const [migrationRunning, setMigrationRunning] = useState(false);
+  const [migrationError, setMigrationError] = useState("");
+  const [migrationSuccess, setMigrationSuccess] = useState("");
+  const [seedersRunning, setSeedersRunning] = useState(false);
+  const [seedersError, setSeedersError] = useState("");
+  const [seedersSuccess, setSeedersSuccess] = useState("");
+  const [documentPacks, setDocumentPacks] = useState<DocumentTemplatePackOption[]>([]);
+  const [selectedDocumentPackId, setSelectedDocumentPackId] = useState("");
+  const [documentTemplateAssignment, setDocumentTemplateAssignment] =
+    useState<TenantDocumentTemplateAssignment | null>(null);
+  const [resolvedDocumentPack, setResolvedDocumentPack] = useState<DocumentTemplatePackOption | null>(null);
+  const [documentTemplateLoading, setDocumentTemplateLoading] = useState(false);
+  const [documentTemplateSaving, setDocumentTemplateSaving] = useState(false);
+  const [documentTemplateError, setDocumentTemplateError] = useState("");
+  const [documentTemplateSuccess, setDocumentTemplateSuccess] = useState("");
 
   const loadTenantModules = async (currentTenantId: string) => {
     if (!currentTenantId) return;
@@ -275,6 +453,191 @@ export default function TenantDetail() {
 
     void loadTenant(tenantId || "");
   }, [tenantId]);
+
+  const loadTenantWhatsAppAccess = async (currentTenantId: string) => {
+    if (!currentTenantId) return;
+
+    setWhatsappAccessLoading(true);
+
+    try {
+      const subscriptionsResponse = await apiJson<SubscriptionListResponse>("platform/subscription");
+      const subscription = (subscriptionsResponse.data ?? []).find(
+        (item) => item.tenant.id === currentTenantId,
+      );
+
+      if (!subscription) {
+        setWhatsappLimitValue(0);
+        return;
+      }
+
+      const plan = await apiJson<ApiPlan>(`platform/plan/${subscription.plan.id}`);
+      setWhatsappLimitValue(getWhatsappLimitValue(plan.plan_limits ?? []));
+    } catch {
+      setWhatsappLimitValue(0);
+    } finally {
+      setWhatsappAccessLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadTenantWhatsAppAccess(tenantId || "");
+  }, [tenantId]);
+
+  const loadWhatsappAccounts = async (currentTenantId: string) => {
+    if (!currentTenantId) return;
+
+    setWhatsappAccountsLoading(true);
+    setWhatsappAccountsError("");
+
+    try {
+      const response = await apiJson<WhatsappAccountListResponse>(
+        `platform/tenant/${currentTenantId}/whatsapp-account`,
+      );
+      setWhatsappAccounts(unwrapWhatsappAccounts(response));
+    } catch (error) {
+      setWhatsappAccountsError(error instanceof Error ? error.message : "Failed to load WhatsApp accounts.");
+    } finally {
+      setWhatsappAccountsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "whatsapp-account" && tenantId && whatsappLimitValue >= 1) {
+      void loadWhatsappAccounts(tenantId);
+    }
+  }, [activeTab, tenantId, whatsappLimitValue]);
+
+  useEffect(() => {
+    if (activeTab === "whatsapp-account" && !whatsappAccessLoading && whatsappLimitValue < 1) {
+      setActiveTab("overview");
+    }
+  }, [activeTab, whatsappAccessLoading, whatsappLimitValue]);
+
+  const closeWhatsappFormModal = () => {
+    setShowWhatsappFormModal(false);
+    setWhatsappFormError("");
+    setEditingWhatsappAccountId(null);
+    setWhatsappFormMode("create");
+  };
+
+  const openWhatsappAddModal = () => {
+    setWhatsappFormMode("create");
+    setEditingWhatsappAccountId(null);
+    setWhatsappForm({
+      displayPhoneNumber: "",
+      phoneCountryCode: "",
+      phoneNationalNumber: "",
+    });
+    setWhatsappFormError("");
+    setShowWhatsappFormModal(true);
+  };
+
+  const openWhatsappEditModal = (account: WhatsappAccount | WhatsappAccountDetail) => {
+    setWhatsappFormMode("edit");
+    setEditingWhatsappAccountId(account.id);
+    setWhatsappForm({
+      displayPhoneNumber: account.displayPhoneNumber,
+      phoneCountryCode: account.phoneCountryCode,
+      phoneNationalNumber: account.phoneNationalNumber,
+    });
+    setWhatsappFormError("");
+    setShowWhatsappViewModal(false);
+    setShowWhatsappFormModal(true);
+  };
+
+  const submitWhatsappAccount = async () => {
+    if (!tenantId) return;
+
+    const displayPhoneNumber = whatsappForm.displayPhoneNumber.trim();
+    const phoneCountryCode = whatsappForm.phoneCountryCode.trim();
+    const phoneNationalNumber = whatsappForm.phoneNationalNumber.trim();
+
+    if (!displayPhoneNumber || !phoneCountryCode || !phoneNationalNumber) {
+      setWhatsappFormError("Display phone number, country code, and national number are required.");
+      return;
+    }
+
+    const payload = {
+      displayPhoneNumber,
+      phoneCountryCode,
+      phoneNationalNumber,
+    };
+
+    setWhatsappFormError("");
+    setWhatsappSubmitting(true);
+
+    try {
+      if (whatsappFormMode === "edit" && editingWhatsappAccountId) {
+        await apiJson(`platform/tenant/${tenantId}/whatsapp-account/${editingWhatsappAccountId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiJson(`platform/tenant/${tenantId}/whatsapp-account`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      closeWhatsappFormModal();
+      await loadWhatsappAccounts(tenantId);
+    } catch (error) {
+      setWhatsappFormError(
+        error instanceof Error
+          ? error.message
+          : whatsappFormMode === "edit"
+            ? "Failed to update WhatsApp account."
+            : "Failed to create WhatsApp account.",
+      );
+    } finally {
+      setWhatsappSubmitting(false);
+    }
+  };
+
+  const viewWhatsappAccount = async (accountId: string) => {
+    if (!tenantId) return;
+
+    setShowWhatsappViewModal(true);
+    setWhatsappViewLoading(true);
+    setWhatsappViewError("");
+    setSelectedWhatsappAccount(null);
+
+    try {
+      const response = await apiJson<WhatsappAccountDetail | { data: WhatsappAccountDetail }>(
+        `platform/tenant/${tenantId}/whatsapp-account/${accountId}`,
+      );
+      setSelectedWhatsappAccount(unwrapWhatsappAccountDetail(response));
+    } catch (error) {
+      setWhatsappViewError(error instanceof Error ? error.message : "Failed to load WhatsApp account.");
+    } finally {
+      setWhatsappViewLoading(false);
+    }
+  };
+
+  const startWhatsappConnect = async (accountId: string) => {
+    if (!tenantId) return;
+
+    setWhatsappConnectingId(accountId);
+    setWhatsappAccountsError("");
+
+    try {
+      await apiJson(`platform/tenant/${tenantId}/whatsapp-account/${accountId}/connect/start`, {
+        method: "POST",
+      });
+      await loadWhatsappAccounts(tenantId);
+
+      if (showWhatsappViewModal && selectedWhatsappAccount?.id === accountId) {
+        const response = await apiJson<WhatsappAccountDetail | { data: WhatsappAccountDetail }>(
+          `platform/tenant/${tenantId}/whatsapp-account/${accountId}`,
+        );
+        setSelectedWhatsappAccount(unwrapWhatsappAccountDetail(response));
+      }
+    } catch (error) {
+      setWhatsappAccountsError(error instanceof Error ? error.message : "Failed to start WhatsApp connection.");
+    } finally {
+      setWhatsappConnectingId(null);
+    }
+  };
 
   const loadProvisioning = async (currentTenantId: string) => {
     if (!currentTenantId) return;
@@ -366,6 +729,62 @@ export default function TenantDetail() {
 
     if (activeTab === "settings" && tenantId) {
       void loadGeoPolicy(tenantId);
+    }
+  }, [activeTab, tenantId]);
+
+  useEffect(() => {
+    const loadDocumentTemplateAssignment = async (currentTenantId: string) => {
+      if (!currentTenantId) return;
+
+      setDocumentTemplateLoading(true);
+      setDocumentTemplateError("");
+      setDocumentTemplateSuccess("");
+
+      try {
+        const [packsResponse, assignmentResult, resolveResult] = await Promise.all([
+          apiJson<DocumentTemplatePackListResponse>("platform/document-templates?page=1&limit=100&status=ACTIVE"),
+          apiJson<TenantDocumentTemplateAssignment | { data: TenantDocumentTemplateAssignment } | null>(
+            `platform/tenant-document-templates/by-tenant/${currentTenantId}`,
+          ).catch((error: unknown) => {
+            if (error instanceof Error && /404|not found/i.test(error.message)) return null;
+            throw error;
+          }),
+          apiJson<ResolvedDocumentTemplate | { data: ResolvedDocumentTemplate }>(
+            `platform/tenant-document-templates/by-tenant/${currentTenantId}/resolve`,
+          ).catch((error: unknown) => {
+            if (error instanceof Error && /404|not found/i.test(error.message)) return null;
+            throw error;
+          }),
+        ]);
+
+        const packs = packsResponse.data ?? [];
+        setDocumentPacks(packs);
+
+        const assignment =
+          assignmentResult && typeof assignmentResult === "object" && "data" in assignmentResult
+            ? assignmentResult.data
+            : assignmentResult;
+
+        setDocumentTemplateAssignment(assignment);
+        setSelectedDocumentPackId(assignment?.templateId || "");
+
+        const resolved =
+          resolveResult && typeof resolveResult === "object" && "data" in resolveResult
+            ? resolveResult.data
+            : resolveResult;
+
+        setResolvedDocumentPack(resolved?.template ?? null);
+      } catch (error) {
+        setDocumentTemplateError(
+          error instanceof Error ? error.message : "Failed to load document template assignment.",
+        );
+      } finally {
+        setDocumentTemplateLoading(false);
+      }
+    };
+
+    if (activeTab === "settings" && tenantId) {
+      void loadDocumentTemplateAssignment(tenantId);
     }
   }, [activeTab, tenantId]);
 
@@ -511,6 +930,144 @@ export default function TenantDetail() {
     }
   };
 
+  const runTenantMigration = async () => {
+    if (!tenantId) return;
+
+    setMigrationRunning(true);
+    setMigrationError("");
+    setMigrationSuccess("");
+
+    try {
+      const response = await apiJson<{ message?: string } | string>(
+        `platform/tenant/migrations?tenantId=${encodeURIComponent(tenantId)}`,
+        { method: "POST" },
+      );
+
+      const message =
+        typeof response === "string"
+          ? response
+          : typeof response === "object" && response !== null && "message" in response
+            ? String(response.message || "")
+            : "";
+
+      setMigrationSuccess(message || "Migration update started successfully.");
+    } catch (error) {
+      setMigrationError(error instanceof Error ? error.message : "Failed to run migration update.");
+    } finally {
+      setMigrationRunning(false);
+    }
+  };
+
+  const runTenantSeeders = async () => {
+    if (!tenantId) return;
+
+    setSeedersRunning(true);
+    setSeedersError("");
+    setSeedersSuccess("");
+
+    try {
+      const response = await apiJson<{ message?: string } | string>(
+        `platform/tenant/seeders?tenantId=${encodeURIComponent(tenantId)}`,
+        { method: "POST" },
+      );
+
+      const message =
+        typeof response === "string"
+          ? response
+          : typeof response === "object" && response !== null && "message" in response
+            ? String(response.message || "")
+            : "";
+
+      setSeedersSuccess(message || "Seeders started successfully.");
+    } catch (error) {
+      setSeedersError(error instanceof Error ? error.message : "Failed to run seeders.");
+    } finally {
+      setSeedersRunning(false);
+    }
+  };
+
+  const saveDocumentTemplateAssignment = async () => {
+    if (!tenantId || !selectedDocumentPackId) return;
+
+    setDocumentTemplateSaving(true);
+    setDocumentTemplateError("");
+    setDocumentTemplateSuccess("");
+
+    try {
+      await apiJson("platform/tenant-document-templates/assign", {
+        method: "POST",
+        body: JSON.stringify({
+          tenantId,
+          templateId: selectedDocumentPackId,
+        }),
+      });
+
+      const [assignmentResult, resolveResult] = await Promise.all([
+        apiJson<TenantDocumentTemplateAssignment | { data: TenantDocumentTemplateAssignment }>(
+          `platform/tenant-document-templates/by-tenant/${tenantId}`,
+        ),
+        apiJson<ResolvedDocumentTemplate | { data: ResolvedDocumentTemplate }>(
+          `platform/tenant-document-templates/by-tenant/${tenantId}/resolve`,
+        ),
+      ]);
+
+      const assignment =
+        assignmentResult && typeof assignmentResult === "object" && "data" in assignmentResult
+          ? assignmentResult.data
+          : assignmentResult;
+      const resolved =
+        resolveResult && typeof resolveResult === "object" && "data" in resolveResult
+          ? resolveResult.data
+          : resolveResult;
+
+      setDocumentTemplateAssignment(assignment);
+      setSelectedDocumentPackId(assignment?.templateId || selectedDocumentPackId);
+      setResolvedDocumentPack(resolved?.template ?? null);
+      setDocumentTemplateSuccess("Document template pack assigned.");
+    } catch (error) {
+      setDocumentTemplateError(
+        error instanceof Error ? error.message : "Failed to assign document template pack.",
+      );
+    } finally {
+      setDocumentTemplateSaving(false);
+    }
+  };
+
+  const clearDocumentTemplateAssignment = async () => {
+    if (!tenantId) return;
+
+    setDocumentTemplateSaving(true);
+    setDocumentTemplateError("");
+    setDocumentTemplateSuccess("");
+
+    try {
+      await apiJson(`platform/tenant-document-templates/by-tenant/${tenantId}`, {
+        method: "DELETE",
+      });
+
+      setDocumentTemplateAssignment(null);
+      setSelectedDocumentPackId("");
+
+      const resolveResult = await apiJson<ResolvedDocumentTemplate | { data: ResolvedDocumentTemplate }>(
+        `platform/tenant-document-templates/by-tenant/${tenantId}/resolve`,
+      ).catch(() => null);
+
+      const resolved =
+        resolveResult && typeof resolveResult === "object" && "data" in resolveResult
+          ? resolveResult.data
+          : resolveResult;
+
+      setResolvedDocumentPack(resolved?.template ?? null);
+      setDocumentTemplateSuccess("Assignment cleared. Tenant will use the default pack.");
+    } catch (error) {
+      setDocumentTemplateError(
+        error instanceof Error ? error.message : "Failed to clear document template assignment.",
+      );
+    } finally {
+      setDocumentTemplateSaving(false);
+    }
+  };
+
   const saveGeoPolicy = async () => {
     if (!tenantId || !geoPolicy) return;
 
@@ -545,8 +1102,12 @@ export default function TenantDetail() {
     { id: "overview" as Tab, label: "Overview", icon: Building2 },
     { id: "modules" as Tab, label: "Modules", icon: Package },
     { id: "database" as Tab, label: "Database", icon: Database },
+    { id: "migrations" as Tab, label: "Run Migration Update", icon: ArrowUpCircle },
     { id: "provisioning" as Tab, label: "Provisioning", icon: Activity },
     { id: "settings" as Tab, label: "Settings", icon: Settings },
+    ...(whatsappLimitValue >= 1
+      ? [{ id: "whatsapp-account" as Tab, label: "WhatsApp Account", icon: MessageSquare }]
+      : []),
     { id: "activity" as Tab, label: "Activity Logs", icon: Clock },
   ];
 
@@ -939,6 +1500,112 @@ export default function TenantDetail() {
               <div className="mt-4 p-3 bg-gray-50 rounded-lg flex items-center justify-between">
                 <span className="text-sm text-gray-600">Last Health Check</span>
                 <span className="text-sm font-medium text-gray-900">{mockTenant.database.lastHealthCheck}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "migrations" && (
+          <div className="bg-white rounded-2xl" style={{
+            border: '1px solid rgba(219, 219, 229, 0.4)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+          }}>
+            <div className="px-6 py-5 border-b" style={{ borderColor: 'rgba(219, 219, 229, 0.4)' }}>
+              <h2 style={{ color: '#21222D' }}>Run Migration Update</h2>
+              <p className="text-sm mt-1" style={{ color: '#6B6C7E' }}>
+                Apply pending database migrations for this tenant
+              </p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="p-4 rounded-xl" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)' }}>
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="size-5 flex-shrink-0 mt-0.5" style={{ color: '#F59E0B' }} />
+                  <div>
+                    <p className="text-sm font-medium" style={{ color: '#21222D' }}>Before you continue</p>
+                    <p className="text-sm mt-1" style={{ color: '#6B6C7E' }}>
+                      This will run schema migrations against the tenant database. Use during maintenance or when deploying schema changes.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Tenant ID</p>
+                  <p className="text-sm font-mono" style={{ color: '#21222D' }}>{tenantId || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Tenant Code</p>
+                  <p className="text-sm font-mono" style={{ color: '#21222D' }}>{tenant?.code || mockTenant.code}</p>
+                </div>
+              </div>
+
+              {migrationError ? (
+                <div className="rounded-2xl border px-4 py-4 text-sm" style={{ borderColor: "rgba(248, 113, 113, 0.3)", color: "#B91C1C", backgroundColor: "#FEF2F2" }}>
+                  {migrationError}
+                </div>
+              ) : null}
+
+              {migrationSuccess ? (
+                <div className="rounded-2xl border px-4 py-4 text-sm flex items-start gap-3" style={{ borderColor: "rgba(34, 197, 94, 0.3)", color: "#16A34A", backgroundColor: "#F0FDF4" }}>
+                  <CheckCircle2 className="size-5 flex-shrink-0" />
+                  <span>{migrationSuccess}</span>
+                </div>
+              ) : null}
+
+              {seedersError ? (
+                <div className="rounded-2xl border px-4 py-4 text-sm" style={{ borderColor: "rgba(248, 113, 113, 0.3)", color: "#B91C1C", backgroundColor: "#FEF2F2" }}>
+                  {seedersError}
+                </div>
+              ) : null}
+
+              {seedersSuccess ? (
+                <div className="rounded-2xl border px-4 py-4 text-sm flex items-start gap-3" style={{ borderColor: "rgba(34, 197, 94, 0.3)", color: "#16A34A", backgroundColor: "#F0FDF4" }}>
+                  <CheckCircle2 className="size-5 flex-shrink-0" />
+                  <span>{seedersSuccess}</span>
+                </div>
+              ) : null}
+
+              <div className="pt-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void runTenantMigration()}
+                  disabled={migrationRunning || seedersRunning || !tenantId}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-60"
+                  style={{ backgroundColor: '#958CE8' }}
+                >
+                  {migrationRunning ? (
+                    <>
+                      <RefreshCw className="size-4 animate-spin" />
+                      Running migration...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowUpCircle className="size-4" />
+                      Run Migration Update
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runTenantSeeders()}
+                  disabled={migrationRunning || seedersRunning || !tenantId}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-60"
+                  style={{ backgroundColor: '#958CE8' }}
+                >
+                  {seedersRunning ? (
+                    <>
+                      <RefreshCw className="size-4 animate-spin" />
+                      Running seeders...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="size-4" />
+                      Run Seeders
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           </div>
@@ -1338,6 +2005,80 @@ export default function TenantDetail() {
               </div>
             </div>
 
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 className="font-semibold text-gray-900 mb-4">Document Template Pack</h2>
+
+              {documentTemplateError ? (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {documentTemplateError}
+                </div>
+              ) : null}
+
+              {documentTemplateSuccess ? (
+                <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  {documentTemplateSuccess}
+                </div>
+              ) : null}
+
+              {documentTemplateLoading ? (
+                <div className="py-8 text-sm text-gray-500">Loading document templates...</div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700">Assigned Pack</label>
+                    <select
+                      value={selectedDocumentPackId}
+                      onChange={(e) => setSelectedDocumentPackId(e.target.value)}
+                      className="w-full max-w-md rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Use platform default</option>
+                      {documentPacks.map((pack) => (
+                        <option key={pack.id} value={pack.id}>
+                          {pack.name}
+                          {pack.isDefault ? " (default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                    <p className="font-medium text-gray-900">Effective pack</p>
+                    <p className="mt-1">
+                      {resolvedDocumentPack
+                        ? `${resolvedDocumentPack.name} (${resolvedDocumentPack.code})${
+                            documentTemplateAssignment ? "" : " — fallback default"
+                          }`
+                        : "No pack resolved yet"}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 pt-6 border-t border-gray-200 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void saveDocumentTemplateAssignment()}
+                  disabled={
+                    documentTemplateSaving ||
+                    documentTemplateLoading ||
+                    !selectedDocumentPackId ||
+                    selectedDocumentPackId === documentTemplateAssignment?.templateId
+                  }
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {documentTemplateSaving ? "Saving..." : "Assign Pack"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void clearDocumentTemplateAssignment()}
+                  disabled={documentTemplateSaving || documentTemplateLoading || !documentTemplateAssignment}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  Clear Assignment
+                </button>
+              </div>
+            </div>
+
             <div className="bg-white rounded-xl border border-red-200 p-6">
               <div className="flex items-start gap-3">
                 <AlertCircle className="size-5 text-red-600 mt-0.5" />
@@ -1361,6 +2102,154 @@ export default function TenantDetail() {
           </div>
         )}
 
+        {activeTab === "whatsapp-account" && (
+          <div className="bg-white rounded-2xl" style={{
+            border: '1px solid rgba(219, 219, 229, 0.4)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+          }}>
+            <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'rgba(219, 219, 229, 0.4)' }}>
+              <div>
+                <h2 style={{ color: '#21222D' }}>WhatsApp Account</h2>
+                <p className="text-sm mt-1" style={{ color: '#6B6C7E' }}>Manage the connected WhatsApp business phone number</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => tenantId && void loadWhatsappAccounts(tenantId)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all"
+                style={{ color: '#6B6C7E' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F8F9FC';
+                  e.currentTarget.style.color = '#21222D';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#6B6C7E';
+                }}
+              >
+                <RefreshCw className="size-4" />
+                Refresh
+              </button>
+            </div>
+
+            <div className="p-6">
+              {whatsappAccountsError ? (
+                <div className="rounded-2xl border px-4 py-4 text-sm mb-4" style={{ borderColor: "rgba(248, 113, 113, 0.3)", color: "#B91C1C", backgroundColor: "#FEF2F2" }}>
+                  {whatsappAccountsError}
+                </div>
+              ) : null}
+
+              {whatsappAccountsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="size-6 animate-spin" style={{ color: '#6B6C7E' }} />
+                  <span className="ml-2 text-sm" style={{ color: '#6B6C7E' }}>Loading WhatsApp accounts...</span>
+                </div>
+              ) : whatsappAccounts.length === 0 ? (
+                <div className="text-center py-12">
+                  <MessageSquare className="size-12 mx-auto mb-4" style={{ color: '#25D366' }} />
+                  <p className="text-sm font-medium" style={{ color: '#21222D' }}>No WhatsApp account connected</p>
+                  <p className="text-sm mt-1 mb-6" style={{ color: '#6B6C7E' }}>Add a WhatsApp business phone number for this tenant.</p>
+                  <button
+                    type="button"
+                    onClick={openWhatsappAddModal}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white transition-colors"
+                    style={{ backgroundColor: '#25D366' }}
+                  >
+                    <Plus className="size-4" />
+                    Add WhatsApp Account
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead style={{ backgroundColor: '#F8F9FC' }}>
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase" style={{ color: '#6B6C7E' }}>Phone Number</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase" style={{ color: '#6B6C7E' }}>Provider</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase" style={{ color: '#6B6C7E' }}>Status</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase" style={{ color: '#6B6C7E' }}>Default</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase" style={{ color: '#6B6C7E' }}>Token</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase" style={{ color: '#6B6C7E' }}>Added</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase" style={{ color: '#6B6C7E' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y" style={{ borderColor: 'rgba(219, 219, 229, 0.4)' }}>
+                      {whatsappAccounts.map((account) => (
+                        <tr key={account.id}>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <p className="text-sm font-medium" style={{ color: '#21222D' }}>{account.displayPhoneNumber}</p>
+                            <p className="text-xs mt-0.5" style={{ color: '#6B6C7E' }}>
+                              {account.phoneCountryCode} {account.phoneNationalNumber}
+                            </p>
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <span className="text-xs px-2 py-1 rounded-full font-medium" style={{
+                              color: '#958CE8',
+                              backgroundColor: 'rgba(149, 140, 232, 0.1)'
+                            }}>
+                              {account.provider}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <span
+                              className="text-xs px-2 py-1 rounded-full font-medium"
+                              style={getWhatsappStatusStyle(account.status)}
+                            >
+                              {formatWhatsappStatus(account.status)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm" style={{ color: '#21222D' }}>
+                            {account.isDefault ? "Yes" : "No"}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm" style={{ color: '#21222D' }}>
+                            {account.hasToken ? "Yes" : "No"}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm" style={{ color: '#6B6C7E' }}>
+                            {formatDateTime(account.createdAt)}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void viewWhatsappAccount(account.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                                style={{ color: '#958CE8', backgroundColor: 'rgba(149, 140, 232, 0.1)' }}
+                              >
+                                <Eye className="size-3.5" />
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openWhatsappEditModal(account)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                                style={{ color: '#6B6C7E', backgroundColor: '#F8F9FC' }}
+                              >
+                                <Edit2 className="size-3.5" />
+                                Edit
+                              </button>
+                              {canStartWhatsappConnect(account.status) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void startWhatsappConnect(account.id)}
+                                  disabled={whatsappConnectingId === account.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-60"
+                                  style={{ backgroundColor: '#25D366' }}
+                                >
+                                  <PlayCircle className="size-3.5" />
+                                  {whatsappConnectingId === account.id ? "Connecting..." : "Connect"}
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === "activity" && (
           <div className="bg-white rounded-xl border border-gray-200">
             <div className="px-6 py-4 border-b border-gray-200">
@@ -1377,7 +2266,7 @@ export default function TenantDetail() {
                   <div className="flex-1">
                     <p className="font-medium text-gray-900">Module Enabled</p>
                     <p className="text-sm text-gray-600 mt-1">Warehouse Management module was enabled</p>
-                    <p className="text-xs text-gray-500 mt-2">2 hours ago • by admin@snd.com</p>
+                    <p className="text-xs text-gray-500 mt-2">2 hours ago • by admin@erp.com</p>
                   </div>
                 </div>
 
@@ -1399,7 +2288,7 @@ export default function TenantDetail() {
                   <div className="flex-1">
                     <p className="font-medium text-gray-900">Settings Updated</p>
                     <p className="text-sm text-gray-600 mt-1">Timezone changed from UTC to America/New_York</p>
-                    <p className="text-xs text-gray-500 mt-2">3 days ago • by admin@snd.com</p>
+                    <p className="text-xs text-gray-500 mt-2">3 days ago • by admin@erp.com</p>
                   </div>
                 </div>
               </div>
@@ -1407,6 +2296,258 @@ export default function TenantDetail() {
           </div>
         )}
       </div>
+
+      {showWhatsappViewModal ? (
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(33, 34, 45, 0.6)', backdropFilter: 'blur(4px)' }}>
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" style={{ boxShadow: '0 25px 70px rgba(0, 0, 0, 0.2)' }}>
+            <div className="px-6 py-5 border-b flex items-center justify-between flex-shrink-0" style={{ borderColor: 'rgba(219, 219, 229, 0.3)' }}>
+              <div>
+                <h2 className="text-xl font-semibold" style={{ color: '#21222D' }}>WhatsApp Account Details</h2>
+                <p className="text-sm mt-1 font-mono" style={{ color: '#6B6C7E' }}>
+                  {selectedWhatsappAccount?.displayPhoneNumber || "Loading..."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWhatsappViewModal(false)}
+                className="p-2 rounded-lg transition-colors"
+                style={{ color: '#6B6C7E' }}
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto">
+              {whatsappViewLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="size-6 animate-spin" style={{ color: '#6B6C7E' }} />
+                  <span className="ml-2 text-sm" style={{ color: '#6B6C7E' }}>Loading account details...</span>
+                </div>
+              ) : whatsappViewError ? (
+                <p className="text-sm" style={{ color: '#EF4444' }}>{whatsappViewError}</p>
+              ) : selectedWhatsappAccount ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Phone Number</p>
+                    <p className="text-sm font-medium" style={{ color: '#21222D' }}>{selectedWhatsappAccount.displayPhoneNumber}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Provider</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{selectedWhatsappAccount.provider}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Country Code</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{selectedWhatsappAccount.phoneCountryCode}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>National Number</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{selectedWhatsappAccount.phoneNationalNumber}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Status</p>
+                    <span
+                      className="text-xs px-2 py-1 rounded-full font-medium inline-block"
+                      style={getWhatsappStatusStyle(selectedWhatsappAccount.status)}
+                    >
+                      {formatWhatsappStatus(selectedWhatsappAccount.status)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Default Account</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{selectedWhatsappAccount.isDefault ? "Yes" : "No"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Has Token</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{selectedWhatsappAccount.hasToken ? "Yes" : "No"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>WABA ID</p>
+                    <p className="text-sm font-mono" style={{ color: '#21222D' }}>{selectedWhatsappAccount.wabaId || "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Phone Number ID</p>
+                    <p className="text-sm font-mono" style={{ color: '#21222D' }}>{selectedWhatsappAccount.phoneNumberId || "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Business Account ID</p>
+                    <p className="text-sm font-mono" style={{ color: '#21222D' }}>{selectedWhatsappAccount.businessAccountId || "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Token Expires At</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{formatDateTime(selectedWhatsappAccount.tokenExpiresAt)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Connected At</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{formatDateTime(selectedWhatsappAccount.connectedAt)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Setup Started At</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{formatDateTime(selectedWhatsappAccount.setupStartedAt)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Failed At</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{formatDateTime(selectedWhatsappAccount.failedAt)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Disabled At</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{formatDateTime(selectedWhatsappAccount.disabledAt)}</p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Failure Reason</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{selectedWhatsappAccount.failureReason || "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Created At</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{formatDateTime(selectedWhatsappAccount.createdAt)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: '#6B6C7E' }}>Updated At</p>
+                    <p className="text-sm" style={{ color: '#21222D' }}>{formatDateTime(selectedWhatsappAccount.updatedAt)}</p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="px-6 py-5 border-t flex items-center justify-end gap-3 flex-shrink-0" style={{
+              backgroundColor: '#FAFBFC',
+              borderColor: 'rgba(219, 219, 229, 0.3)'
+            }}>
+              {selectedWhatsappAccount ? (
+                <button
+                  type="button"
+                  onClick={() => openWhatsappEditModal(selectedWhatsappAccount)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm border"
+                  style={{ color: '#958CE8', borderColor: '#958CE8' }}
+                >
+                  <Edit2 className="size-4" />
+                  Edit
+                </button>
+              ) : null}
+              {selectedWhatsappAccount && canStartWhatsappConnect(selectedWhatsappAccount.status) ? (
+                <button
+                  type="button"
+                  onClick={() => void startWhatsappConnect(selectedWhatsappAccount.id)}
+                  disabled={whatsappConnectingId === selectedWhatsappAccount.id}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl font-medium text-sm disabled:opacity-60"
+                  style={{ backgroundColor: '#25D366' }}
+                >
+                  <PlayCircle className="size-4" />
+                  {whatsappConnectingId === selectedWhatsappAccount.id ? "Connecting..." : "Connect"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setShowWhatsappViewModal(false)}
+                className="px-5 py-2.5 font-medium text-sm transition-colors rounded-xl border"
+                style={{
+                  color: '#6B6C7E',
+                  borderColor: 'rgba(219, 219, 229, 0.6)'
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showWhatsappFormModal ? (
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(33, 34, 45, 0.6)', backdropFilter: 'blur(4px)' }}>
+          <div className="bg-white rounded-2xl max-w-md w-full" style={{ boxShadow: '0 25px 70px rgba(0, 0, 0, 0.2)' }}>
+            <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'rgba(219, 219, 229, 0.3)' }}>
+              <div>
+                <h2 className="text-xl font-semibold" style={{ color: '#21222D' }}>
+                  {whatsappFormMode === "edit" ? "Edit WhatsApp Account" : "Add WhatsApp Account"}
+                </h2>
+                <p className="text-sm mt-1" style={{ color: '#6B6C7E' }}>
+                  {whatsappFormMode === "edit"
+                    ? "Update the WhatsApp business phone number"
+                    : "Connect a WhatsApp business phone number"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeWhatsappFormModal}
+                className="p-2 rounded-lg transition-colors"
+                style={{ color: '#6B6C7E' }}
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: '#21222D' }}>Display Phone Number</label>
+                <input
+                  type="text"
+                  value={whatsappForm.displayPhoneNumber}
+                  onChange={(e) => setWhatsappForm((current) => ({ ...current, displayPhoneNumber: e.target.value }))}
+                  placeholder="+923001234567"
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  style={{ borderColor: 'rgba(219, 219, 229, 0.6)' }}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: '#21222D' }}>Phone Country Code</label>
+                <input
+                  type="text"
+                  value={whatsappForm.phoneCountryCode}
+                  onChange={(e) => setWhatsappForm((current) => ({ ...current, phoneCountryCode: e.target.value }))}
+                  placeholder="+92"
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  style={{ borderColor: 'rgba(219, 219, 229, 0.6)' }}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: '#21222D' }}>Phone National Number</label>
+                <input
+                  type="text"
+                  value={whatsappForm.phoneNationalNumber}
+                  onChange={(e) => setWhatsappForm((current) => ({ ...current, phoneNationalNumber: e.target.value }))}
+                  placeholder="3001234567"
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  style={{ borderColor: 'rgba(219, 219, 229, 0.6)' }}
+                />
+              </div>
+              {whatsappFormError ? (
+                <p className="text-sm" style={{ color: '#EF4444' }}>{whatsappFormError}</p>
+              ) : null}
+            </div>
+
+            <div className="px-6 py-5 border-t flex items-center justify-end gap-3" style={{
+              backgroundColor: '#FAFBFC',
+              borderColor: 'rgba(219, 219, 229, 0.3)'
+            }}>
+              <button
+                type="button"
+                onClick={closeWhatsappFormModal}
+                className="px-5 py-2.5 font-medium text-sm transition-colors rounded-xl border"
+                style={{
+                  color: '#6B6C7E',
+                  borderColor: 'rgba(219, 219, 229, 0.6)'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitWhatsappAccount()}
+                disabled={whatsappSubmitting}
+                className="px-5 py-2.5 text-white rounded-xl font-medium text-sm disabled:opacity-60"
+                style={{ backgroundColor: '#25D366' }}
+              >
+                {whatsappSubmitting
+                  ? whatsappFormMode === "edit"
+                    ? "Saving..."
+                    : "Adding..."
+                  : whatsappFormMode === "edit"
+                    ? "Save Changes"
+                    : "Add Account"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

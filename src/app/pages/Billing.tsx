@@ -29,8 +29,8 @@ type InvoiceStatus = "DRAFT" | "ISSUED" | "PAID" | "FAILED" | "OVERDUE" | "PENDI
 type AddonType = "recurring" | "one-time" | "usage-based";
 
 type LimitKey = "storage" | "api_calls" | "users" | "custom";
-type PlanLimitKey = "USER" | "STORAGE" | "BUSINESS" | "EMPLOYEES" | "SQL_AGENT_DAILY" | "SQL_AGENT_MONTHLY" | "WHATSAPP";
-type AddonLimitKey = "USER" | "STORAGE" | "BUSINESS" | "EMPLOYEES" | "SQL_AGENT_DAILY" | "SQL_AGENT_MONTHLY" | "WHATSAPP";
+type PlanLimitKey = "USER" | "STORAGE" | "BUSINESS" | "EMPLOYEES" | "SQL_AGENT_DAILY" | "SQL_AGENT_MONTHLY" | "WHATSAPP" | "DAILY_BACKUP";
+type AddonLimitKey = "USER" | "STORAGE" | "BUSINESS" | "EMPLOYEES" | "SQL_AGENT_DAILY" | "SQL_AGENT_MONTHLY" | "WHATSAPP" | "DAILY_BACKUP";
 type BillingCycle = "MONTHLY" | "YEARLY"
 
 type ApiPlanLimit = {
@@ -194,7 +194,7 @@ type AddonFormState = {
 };
 
 const initialPlanLimitRow: PlanFormLimit = { limitKey: "", limitValue: "" };
-const PLAN_LIMIT_KEY_OPTIONS: PlanLimitKey[] = ["USER", "STORAGE", "BUSINESS", "EMPLOYEES", "SQL_AGENT_DAILY", "SQL_AGENT_MONTHLY", "WHATSAPP"];
+const PLAN_LIMIT_KEY_OPTIONS: PlanLimitKey[] = ["USER", "STORAGE", "BUSINESS", "EMPLOYEES", "SQL_AGENT_DAILY", "SQL_AGENT_MONTHLY", "WHATSAPP", "DAILY_BACKUP"];
 
 const initialPlanFormState: PlanFormState = {
   title: "",
@@ -243,7 +243,7 @@ const normalizePlanLimitKey = (value: string) =>
 const isPlanLimitKey = (value: string): value is PlanLimitKey =>
   PLAN_LIMIT_KEY_OPTIONS.includes(value as PlanLimitKey);
 
-const ADDON_LIMIT_KEY_OPTIONS: AddonLimitKey[] = ["USER", "STORAGE", "BUSINESS", "EMPLOYEES", "SQL_AGENT_DAILY", "SQL_AGENT_MONTHLY", "WHATSAPP"];
+const ADDON_LIMIT_KEY_OPTIONS: AddonLimitKey[] = ["USER", "STORAGE", "BUSINESS", "EMPLOYEES", "SQL_AGENT_DAILY", "SQL_AGENT_MONTHLY", "WHATSAPP", "DAILY_BACKUP"];
 
 const isAddonLimitKey = (value: string): value is AddonLimitKey =>
   ADDON_LIMIT_KEY_OPTIONS.includes(value as AddonLimitKey);

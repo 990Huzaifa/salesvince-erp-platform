@@ -169,10 +169,10 @@ export default function SupportTools() {
 
         <div className="divide-y divide-gray-200">
           {[
-            { action: "Database Console", tenant: "Acme Corp", user: "admin@snd.com", time: "2 hours ago", status: "success" },
-            { action: "Impersonate Tenant", tenant: "TechStart", user: "jane@snd.com", time: "5 hours ago", status: "success" },
-            { action: "Re-provision", tenant: "Metro Dist", user: "admin@snd.com", time: "1 day ago", status: "failed" },
-            { action: "Export Data", tenant: "Global Supplies", user: "admin@snd.com", time: "2 days ago", status: "success" },
+            { action: "Database Console", tenant: "Acme Corp", user: "admin@erp.com", time: "2 hours ago", status: "success" },
+            { action: "Impersonate Tenant", tenant: "TechStart", user: "jane@erp.com", time: "5 hours ago", status: "success" },
+            { action: "Re-provision", tenant: "Metro Dist", user: "admin@erp.com", time: "1 day ago", status: "failed" },
+            { action: "Export Data", tenant: "Global Supplies", user: "admin@erp.com", time: "2 days ago", status: "success" },
           ].map((item, index) => (
             <div key={index} className="px-6 py-4 hover:bg-gray-50 transition-colors">
               <div className="flex items-center justify-between">

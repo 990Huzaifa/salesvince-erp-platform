@@ -21,6 +21,8 @@ import MasterLogin from "./pages/Login";
 import Settings from "./pages/Settings";
 import SupportTools from "./pages/SupportTools";
 import NotFound from "./pages/NotFound";
+import WhatsAppTemplates from "./pages/WhatsappTemplates";
+import DocumentTemplates from "./pages/DocumentTemplates";
 
 function TenantRedirect() {
   const { tenantId } = useParams();
@@ -70,6 +72,8 @@ export const router = createBrowserRouter([
           { path: "roles", Component: RoleManagement },
           { path: "settings", Component: Settings },
           { path: "support", Component: SupportTools },
+          { path: "whatsapp-templates", Component: WhatsAppTemplates },
+          { path: "document-templates", Component: DocumentTemplates },
           { path: "*", Component: NotFound },
         ],
       },
