@@ -172,9 +172,9 @@ type TenantDocumentTemplateAssignment = {
   template?: DocumentTemplatePackOption | null;
 };
 
-type ResolvedDocumentTemplate = {
-  template: DocumentTemplatePackOption | null;
-  item?: unknown;
+type TenantDocumentTemplateAssignmentList = {
+  data: TenantDocumentTemplateAssignment[];
+  meta?: { total: number };
 };
 
 type Tab = "overview" | "modules" | "database" | "migrations" | "provisioning" | "settings" | "activity" | "whatsapp-account";
@@ -409,11 +409,13 @@ export default function TenantDetail() {
   const [seedersSuccess, setSeedersSuccess] = useState("");
   const [documentPacks, setDocumentPacks] = useState<DocumentTemplatePackOption[]>([]);
   const [selectedDocumentPackId, setSelectedDocumentPackId] = useState("");
-  const [documentTemplateAssignment, setDocumentTemplateAssignment] =
-    useState<TenantDocumentTemplateAssignment | null>(null);
+  const [documentTemplateAssignments, setDocumentTemplateAssignments] = useState<
+    TenantDocumentTemplateAssignment[]
+  >([]);
   const [resolvedDocumentPack, setResolvedDocumentPack] = useState<DocumentTemplatePackOption | null>(null);
   const [documentTemplateLoading, setDocumentTemplateLoading] = useState(false);
   const [documentTemplateSaving, setDocumentTemplateSaving] = useState(false);
+  const [removingDocumentPackId, setRemovingDocumentPackId] = useState<string | null>(null);
   const [documentTemplateError, setDocumentTemplateError] = useState("");
   const [documentTemplateSuccess, setDocumentTemplateSuccess] = useState("");
 
@@ -733,6 +735,13 @@ export default function TenantDetail() {
   }, [activeTab, tenantId]);
 
   useEffect(() => {
+    const isEmptyAssignmentError = (error: unknown) => {
+      if (!(error instanceof Error)) return false;
+      return /404|not found|no document template assigned|no document template available/i.test(
+        error.message,
+      );
+    };
+
     const loadDocumentTemplateAssignment = async (currentTenantId: string) => {
       if (!currentTenantId) return;
 
@@ -741,39 +750,50 @@ export default function TenantDetail() {
       setDocumentTemplateSuccess("");
 
       try {
-        const [packsResponse, assignmentResult, resolveResult] = await Promise.all([
-          apiJson<DocumentTemplatePackListResponse>("platform/document-templates?page=1&limit=100&status=ACTIVE"),
-          apiJson<TenantDocumentTemplateAssignment | { data: TenantDocumentTemplateAssignment } | null>(
-            `platform/tenant-document-templates/by-tenant/${currentTenantId}`,
-          ).catch((error: unknown) => {
-            if (error instanceof Error && /404|not found/i.test(error.message)) return null;
-            throw error;
-          }),
-          apiJson<ResolvedDocumentTemplate | { data: ResolvedDocumentTemplate }>(
+        // Load packs separately so empty assignment/resolve does not hide the dropdown.
+        const packsResponse = await apiJson<
+          DocumentTemplatePackListResponse | DocumentTemplatePackOption[]
+        >("platform/document-templates?page=1&limit=100&status=ACTIVE");
+
+        const packs = Array.isArray(packsResponse)
+          ? packsResponse
+          : packsResponse.data ?? [];
+        setDocumentPacks(packs);
+
+        const [assignmentResult, resolveResult] = await Promise.all([
+          apiJson<
+            | TenantDocumentTemplateAssignment[]
+            | TenantDocumentTemplateAssignmentList
+            | null
+          >(`platform/tenant-document-templates/by-tenant/${currentTenantId}`).catch(
+            (error: unknown) => {
+              if (isEmptyAssignmentError(error)) return null;
+              throw error;
+            },
+          ),
+          apiJson<DocumentTemplatePackOption | { data: DocumentTemplatePackOption }>(
             `platform/tenant-document-templates/by-tenant/${currentTenantId}/resolve`,
           ).catch((error: unknown) => {
-            if (error instanceof Error && /404|not found/i.test(error.message)) return null;
+            if (isEmptyAssignmentError(error)) return null;
             throw error;
           }),
         ]);
 
-        const packs = packsResponse.data ?? [];
-        setDocumentPacks(packs);
+        const assignments = Array.isArray(assignmentResult)
+          ? assignmentResult
+          : assignmentResult && typeof assignmentResult === "object" && "data" in assignmentResult
+            ? assignmentResult.data ?? []
+            : [];
 
-        const assignment =
-          assignmentResult && typeof assignmentResult === "object" && "data" in assignmentResult
-            ? assignmentResult.data
-            : assignmentResult;
-
-        setDocumentTemplateAssignment(assignment);
-        setSelectedDocumentPackId(assignment?.templateId || "");
+        setDocumentTemplateAssignments(assignments);
+        setSelectedDocumentPackId("");
 
         const resolved =
           resolveResult && typeof resolveResult === "object" && "data" in resolveResult
             ? resolveResult.data
             : resolveResult;
 
-        setResolvedDocumentPack(resolved?.template ?? null);
+        setResolvedDocumentPack(resolved ?? null);
       } catch (error) {
         setDocumentTemplateError(
           error instanceof Error ? error.message : "Failed to load document template assignment.",
@@ -986,8 +1006,53 @@ export default function TenantDetail() {
     }
   };
 
+  const reloadDocumentTemplateAssignment = async (currentTenantId: string) => {
+    const isEmptyAssignmentError = (error: unknown) => {
+      if (!(error instanceof Error)) return false;
+      return /404|not found|no document template assigned|no document template available/i.test(
+        error.message,
+      );
+    };
+
+    const [assignmentResult, resolveResult] = await Promise.all([
+      apiJson<TenantDocumentTemplateAssignment[] | TenantDocumentTemplateAssignmentList>(
+        `platform/tenant-document-templates/by-tenant/${currentTenantId}`,
+      ).catch((error: unknown) => {
+        if (isEmptyAssignmentError(error)) return { data: [] };
+        throw error;
+      }),
+      apiJson<DocumentTemplatePackOption | { data: DocumentTemplatePackOption }>(
+        `platform/tenant-document-templates/by-tenant/${currentTenantId}/resolve`,
+      ).catch((error: unknown) => {
+        if (isEmptyAssignmentError(error)) return null;
+        throw error;
+      }),
+    ]);
+
+    const assignments = Array.isArray(assignmentResult)
+      ? assignmentResult
+      : assignmentResult?.data ?? [];
+
+    setDocumentTemplateAssignments(assignments);
+
+    const resolved =
+      resolveResult && typeof resolveResult === "object" && "data" in resolveResult
+        ? resolveResult.data
+        : resolveResult;
+
+    setResolvedDocumentPack(resolved ?? null);
+  };
+
   const saveDocumentTemplateAssignment = async () => {
     if (!tenantId || !selectedDocumentPackId) return;
+
+    const alreadyAssigned = documentTemplateAssignments.some(
+      (row) => row.templateId === selectedDocumentPackId,
+    );
+    if (alreadyAssigned) {
+      setDocumentTemplateError("This pack is already assigned to the tenant.");
+      return;
+    }
 
     setDocumentTemplateSaving(true);
     setDocumentTemplateError("");
@@ -1002,27 +1067,8 @@ export default function TenantDetail() {
         }),
       });
 
-      const [assignmentResult, resolveResult] = await Promise.all([
-        apiJson<TenantDocumentTemplateAssignment | { data: TenantDocumentTemplateAssignment }>(
-          `platform/tenant-document-templates/by-tenant/${tenantId}`,
-        ),
-        apiJson<ResolvedDocumentTemplate | { data: ResolvedDocumentTemplate }>(
-          `platform/tenant-document-templates/by-tenant/${tenantId}/resolve`,
-        ),
-      ]);
-
-      const assignment =
-        assignmentResult && typeof assignmentResult === "object" && "data" in assignmentResult
-          ? assignmentResult.data
-          : assignmentResult;
-      const resolved =
-        resolveResult && typeof resolveResult === "object" && "data" in resolveResult
-          ? resolveResult.data
-          : resolveResult;
-
-      setDocumentTemplateAssignment(assignment);
-      setSelectedDocumentPackId(assignment?.templateId || selectedDocumentPackId);
-      setResolvedDocumentPack(resolved?.template ?? null);
+      setSelectedDocumentPackId("");
+      await reloadDocumentTemplateAssignment(tenantId);
       setDocumentTemplateSuccess("Document template pack assigned.");
     } catch (error) {
       setDocumentTemplateError(
@@ -1030,6 +1076,29 @@ export default function TenantDetail() {
       );
     } finally {
       setDocumentTemplateSaving(false);
+    }
+  };
+
+  const removeDocumentTemplateAssignment = async (templateId: string) => {
+    if (!tenantId) return;
+
+    setRemovingDocumentPackId(templateId);
+    setDocumentTemplateError("");
+    setDocumentTemplateSuccess("");
+
+    try {
+      await apiJson(
+        `platform/tenant-document-templates/by-tenant/${tenantId}/templates/${templateId}`,
+        { method: "DELETE" },
+      );
+      await reloadDocumentTemplateAssignment(tenantId);
+      setDocumentTemplateSuccess("Pack removed from tenant.");
+    } catch (error) {
+      setDocumentTemplateError(
+        error instanceof Error ? error.message : "Failed to remove document template pack.",
+      );
+    } finally {
+      setRemovingDocumentPackId(null);
     }
   };
 
@@ -1045,20 +1114,20 @@ export default function TenantDetail() {
         method: "DELETE",
       });
 
-      setDocumentTemplateAssignment(null);
+      setDocumentTemplateAssignments([]);
       setSelectedDocumentPackId("");
 
-      const resolveResult = await apiJson<ResolvedDocumentTemplate | { data: ResolvedDocumentTemplate }>(
-        `platform/tenant-document-templates/by-tenant/${tenantId}/resolve`,
-      ).catch(() => null);
+      const resolveResult = await apiJson<
+        DocumentTemplatePackOption | { data: DocumentTemplatePackOption }
+      >(`platform/tenant-document-templates/by-tenant/${tenantId}/resolve`).catch(() => null);
 
       const resolved =
         resolveResult && typeof resolveResult === "object" && "data" in resolveResult
           ? resolveResult.data
           : resolveResult;
 
-      setResolvedDocumentPack(resolved?.template ?? null);
-      setDocumentTemplateSuccess("Assignment cleared. Tenant will use the default pack.");
+      setResolvedDocumentPack(resolved ?? null);
+      setDocumentTemplateSuccess("All assignments cleared. Tenant will use the default pack.");
     } catch (error) {
       setDocumentTemplateError(
         error instanceof Error ? error.message : "Failed to clear document template assignment.",
@@ -2006,7 +2075,7 @@ export default function TenantDetail() {
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="font-semibold text-gray-900 mb-4">Document Template Pack</h2>
+              <h2 className="font-semibold text-gray-900 mb-4">Document Template Packs</h2>
 
               {documentTemplateError ? (
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -2025,20 +2094,85 @@ export default function TenantDetail() {
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-gray-700">Assigned Pack</label>
-                    <select
-                      value={selectedDocumentPackId}
-                      onChange={(e) => setSelectedDocumentPackId(e.target.value)}
-                      className="w-full max-w-md rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Use platform default</option>
-                      {documentPacks.map((pack) => (
-                        <option key={pack.id} value={pack.id}>
-                          {pack.name}
-                          {pack.isDefault ? " (default)" : ""}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="mb-2 block text-sm font-medium text-gray-700">Add Pack</label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <select
+                        value={selectedDocumentPackId}
+                        onChange={(e) => setSelectedDocumentPackId(e.target.value)}
+                        className="w-full max-w-md rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select pack to assign</option>
+                        {documentPacks
+                          .filter(
+                            (pack) =>
+                              !documentTemplateAssignments.some((row) => row.templateId === pack.id),
+                          )
+                          .map((pack) => (
+                            <option key={pack.id} value={pack.id}>
+                              {pack.name}
+                              {pack.isDefault ? " (default)" : ""}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void saveDocumentTemplateAssignment()}
+                        disabled={
+                          documentTemplateSaving ||
+                          documentTemplateLoading ||
+                          !selectedDocumentPackId
+                        }
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {documentTemplateSaving ? "Assigning..." : "Assign Pack"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-sm font-medium text-gray-700">Assigned Packs</p>
+                    {documentTemplateAssignments.length === 0 ? (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                        No packs assigned. Tenant will use the platform default.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {documentTemplateAssignments.map((assignment) => {
+                          const pack =
+                            assignment.template ||
+                            documentPacks.find((item) => item.id === assignment.templateId);
+                          return (
+                            <div
+                              key={assignment.id || assignment.templateId}
+                              className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-4 py-3"
+                            >
+                              <div>
+                                <p className="text-sm font-medium text-gray-900">
+                                  {pack?.name || assignment.templateId}
+                                </p>
+                                <p className="text-xs text-gray-500 font-mono">
+                                  {pack?.code || assignment.templateId}
+                                  {pack?.isDefault ? " · default" : ""}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void removeDocumentTemplateAssignment(assignment.templateId)}
+                                disabled={
+                                  documentTemplateSaving ||
+                                  removingDocumentPackId === assignment.templateId
+                                }
+                                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                              >
+                                {removingDocumentPackId === assignment.templateId
+                                  ? "Removing..."
+                                  : "Remove"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
@@ -2046,7 +2180,7 @@ export default function TenantDetail() {
                     <p className="mt-1">
                       {resolvedDocumentPack
                         ? `${resolvedDocumentPack.name} (${resolvedDocumentPack.code})${
-                            documentTemplateAssignment ? "" : " — fallback default"
+                            documentTemplateAssignments.length === 0 ? " — fallback default" : ""
                           }`
                         : "No pack resolved yet"}
                     </p>
@@ -2057,24 +2191,15 @@ export default function TenantDetail() {
               <div className="mt-6 pt-6 border-t border-gray-200 flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => void saveDocumentTemplateAssignment()}
+                  onClick={() => void clearDocumentTemplateAssignment()}
                   disabled={
                     documentTemplateSaving ||
                     documentTemplateLoading ||
-                    !selectedDocumentPackId ||
-                    selectedDocumentPackId === documentTemplateAssignment?.templateId
+                    documentTemplateAssignments.length === 0
                   }
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {documentTemplateSaving ? "Saving..." : "Assign Pack"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void clearDocumentTemplateAssignment()}
-                  disabled={documentTemplateSaving || documentTemplateLoading || !documentTemplateAssignment}
                   className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  Clear Assignment
+                  Clear All
                 </button>
               </div>
             </div>
