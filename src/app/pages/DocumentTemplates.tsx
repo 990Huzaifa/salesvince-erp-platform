@@ -295,11 +295,17 @@ const PREVIEW_REPORT_ROWS = [
   { label: "Warehouse", value: "Improved", detail: "Throughput increased" },
 ];
 
+const PREVIEW_BUSINESS_LOGO = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="28" fill="#0f766e"/><path d="M64 20 108 104H91L64 53 37 104H20z" fill="#fff"/><circle cx="64" cy="91" r="8" fill="#f59e0b"/></svg>',
+)}`;
+const TEMPLATE_LOGO_MARKER = "\u0000DOCUMENT_TEMPLATE_COMPANY_LOGO\u0000";
+
 const TEMPLATE_PREVIEW_DATA: Record<string, unknown> = {
   companyInfo: {
     name: "Test",
     address: "",
     mobile: "",
+    logo: PREVIEW_BUSINESS_LOGO,
     initials: "EP",
     preparedBy: "Admin",
   },
@@ -542,7 +548,20 @@ const fillTemplatePreviewContent = (content: string) => {
     },
   );
 
-  const contentWithConditionals = content.replace(
+  const companyInfo = TEMPLATE_PREVIEW_DATA.companyInfo as Record<string, unknown>;
+  const logoSource = String(companyInfo.logo || "").trim();
+  const logoMarkup = /^(?:https?:\/\/|data:image\/[a-z0-9.+-]+(?:;[^,]*)?,|\/(?!\/))/i.test(logoSource)
+    ? `<img src="${escapeHtml(logoSource)}" alt="${escapeHtml(companyInfo.name || "Business logo")}" style="display:block;width:auto;height:auto;max-width:128px;max-height:72px;object-fit:contain;margin:0 auto;" />`
+    : "";
+  const hasExplicitLogoBinding = /\{\{\s*(?:companyInfo\.)?(?:logo|businessLogo|business_logo|logoUrl)\s*\}\}/i.test(content);
+  const initials = String(companyInfo.initials || "").trim()
+    || String(companyInfo.name || "").trim()
+      .split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
+  const brandMarkup = logoMarkup && !hasExplicitLogoBinding
+    ? logoMarkup
+    : escapeHtml(initials);
+  const templateContent = content.replace(/\{\{\s*companyInfo\.initials\s*\}\}/gi, TEMPLATE_LOGO_MARKER);
+  const contentWithConditionals = templateContent.replace(
     /\{\{#if\s+([a-zA-Z0-9_.]+)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g,
     (_match, path: string, markup: string) => readPath(path, TEMPLATE_PREVIEW_DATA)
       ? markup
@@ -558,7 +577,7 @@ const fillTemplatePreviewContent = (content: string) => {
   );
 
   const interpolatedMarkup = interpolate(withEachMarkers, TEMPLATE_PREVIEW_DATA);
-  return interpolatedMarkup.replace(
+  const expandedMarkup = interpolatedMarkup.replace(
     /\u0000DOCUMENT_TEMPLATE_EACH_(\d+)\u0000/g,
     (_marker, blockIndex: string) => {
       const block = eachBlocks[Number(blockIndex)];
@@ -576,6 +595,7 @@ const fillTemplatePreviewContent = (content: string) => {
       }).join("");
     },
   );
+  return expandedMarkup.replaceAll(TEMPLATE_LOGO_MARKER, brandMarkup);
 };
 
 const getTemplatePreviewDocument = (
